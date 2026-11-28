@@ -1,0 +1,31 @@
+{
+  "lang": "en",
+  "cards": [
+    {
+      "title": "Bitcoin",
+      "color": "#F7931A",
+      "url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true",
+      "fields": [
+        { "label": "USD", "path": "bitcoin.usd", "prefix": "$", "decimals": 0 },
+        { "label": "24h", "path": "bitcoin.usd_24h_change", "format": "change", "unit": "%" }
+      ]
+    },
+    {
+      "title": "New York weather",
+      "color": "#4FA3E0",
+      "url": "https://api.open-meteo.com/v1/forecast?latitude=40.71&longitude=-74.01&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m",
+      "fields": [
+        { "label": "Now", "path": "current.temperature_2m", "unit": "°", "decimals": 0 },
+        { "label": "Feels", "path": "current.apparent_temperature", "unit": "°", "decimals": 0 },
+        { "label": "Humidity", "path": "current.relative_humidity_2m", "unit": "%" },
+        { "label": "Wind km/h", "path": "current.wind_speed_10m", "decimals": 0 }
+      ]
+    },
+    {
+      "title": "This Mac",
+      "command": "df -h / | awk 'NR==2 {print $5}'",
+      "fields": [{ "label": "Disk used" }]
+    },
+    { "type": "nba-player", "player": "Stephen Curry" }
+  ]
+}
