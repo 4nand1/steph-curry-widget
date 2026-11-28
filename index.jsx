@@ -1,30 +1,31 @@
-// Steph Curry desktop widget for Übersicht (ESPN data via fetch.py): injury status, live game line,
+// NBA player desktop widget for Übersicht (ESPN data via fetch.py): injury status, live game line,
 // season averages; the button opens the season history (career compare, points trend, best game, game log).
 import { css, React } from "uebersicht";
 
+const PLAYER = "Stephen Curry"; // any NBA player: a name ("LeBron James") or an ESPN athlete id ("1966")
 const LANG = "en"; // "en" or "mn"
 
 const STR = {
   en: {
     final: "Final", pts: "pts", three: "3PT", ast: "ast", reb: "reb", min: "min",
-    notPlaying: (live) => `Steph ${live ? "is not playing" : "did not play"} in this game.`,
+    notPlaying: (n, live) => `${n} ${live ? "is not playing" : "did not play"} in this game.`,
     PTS: "PTS", AST: "AST", REB: "REB", close: "Close", avgTitle: "Averages: season vs career",
-    season: "Season", career: "Career", gp: "GP", hint: "Gold: season average is above his career average.",
+    season: "Season", career: "Career", gp: "GP", hint: "Gold: season average is above the career average.",
     trend: "Season points · by game", best: "Season high", log: "Game log",
     cols: ["Date", "Opp", "W/L", "MIN", "PTS", "REB", "AST", "3PT"],
-    loading: "Loading Steph's stats…", gpAvg: (n) => `Averages over ${n} games`,
+    loading: "Loading player stats…", notFound: (q) => `No NBA player found for "${q}". Check PLAYER in index.jsx.`, gpAvg: (n) => `Averages over ${n} games`,
     tiles: ["Points", "3PT %", "Assists", "Rebounds"],
     btn: "Game log & career", btnSub: "Points per game, season high, career averages",
     injured: (s) => s || "Injured", error: "Widget error", noPython: "Could not run fetch.py. Is python3 installed? (xcode-select --install)",
   },
   mn: {
     final: "Төгссөн", pts: "оноо", three: "3 оноо", ast: "дамж", reb: "самб", min: "мин",
-    notPlaying: (live) => `Steph энэ тоглолтод ${live ? "тоглохгүй байна" : "тоглоогүй"}.`,
+    notPlaying: (n, live) => `${n} энэ тоглолтод ${live ? "тоглохгүй байна" : "тоглоогүй"}.`,
     PTS: "Оноо", AST: "Дамж.", REB: "Самбар", close: "Хаах", avgTitle: "Дундаж: улирал ба карьер",
     season: "Улирал", career: "Карьер", gp: "тогл.", hint: "Шар өнгөтэй тоо: улирлын дундаж карьерынхаас өндөр байна.",
     trend: "Улирлын оноо · тоглолт бүрээр", best: "Улирлын шилдэг", log: "Тоглолтын түүх",
     cols: ["Огноо", "Өрс.", "Ү/Д", "Мин", "Оноо", "Самб", "Дамж", "3PT"],
-    loading: "Steph-ийн мэдээлэл ачаалж байна…", gpAvg: (n) => `${n} тоглолтын дундаж`,
+    loading: "Тоглогчийн мэдээлэл ачаалж байна…", notFound: (q) => `"${q}" нэртэй NBA тоглогч олдсонгүй. index.jsx доторх PLAYER-ийг шалгана уу.`, gpAvg: (n) => `${n} тоглолтын дундаж`,
     tiles: ["Оноо", "3 оноо %", "Дамж.", "Самбар"],
     btn: "Тоглолтын түүх ба карьер", btnSub: "Тоглолт бүрийн оноо, шилдэг тоглолт, карьерын дундаж",
     injured: () => "Бэртэлтэй", error: "Самбар алдаатай", noPython: "fetch.py ажиллаж чадсангүй. python3 суусан эсэхийг шалгана уу (xcode-select --install).",
@@ -32,14 +33,14 @@ const STR = {
 };
 const T = STR[LANG] || STR.en;
 
-export const command = "python3 steph-curry.widget/fetch.py"; // path is relative to the widgets folder
+export const command = `python3 nba-player.widget/fetch.py "${PLAYER.replace(/[^\w .'-]/g, "")}"`; // path is relative to the widgets folder
 export const refreshFrequency = 60 * 1000; // 1 min: fresh within a minute of login or wake
 
 export const initialState = { data: null, error: null, open: false };
 export const updateState = (e, s) => {
   if (e.type === "UB/COMMAND_RAN") {
     if (e.error) return s.data ? s : { ...s, error: T.noPython }; // keep last good data on a transient failure
-    try { return { ...s, data: JSON.parse(e.output), error: null }; } catch { return s; }
+    try { const d = JSON.parse(e.output); return d ? { ...s, data: d, error: null } : s; } catch { return s; } // null = ESPN unreachable
   }
   if (e.type === "TOGGLE") return { ...s, open: !s.open };
   return s;
@@ -60,7 +61,7 @@ function averages(st) {
 const shot = (v) => { const [m, a] = String(v || "").split("-").map(Number); return a ? { m, a, pct: Math.round((m / a) * 100) } : { m: m || 0, a: 0, pct: null }; };
 
 // The line in the game that is on now (or just ended): 3PT first, it is what this widget is for.
-const liveLine = (lv) => {
+const liveLine = (lv, name) => {
   if (!lv) return null;
   const live = lv.state === "in";
   const L = lv.line;
@@ -70,7 +71,7 @@ const liveLine = (lv) => {
       <div className={liveHead}>
         <span className={live ? liveDot : finDot}>{live ? "● LIVE" : T.final}</span>
         <span>{lv.home ? "vs" : "@"} {lv.opp} · {lv.us}–{lv.them}</span>
-        <span className={muted}>{lv.detail}</span>
+        {live && <span className={muted}>{lv.detail}</span>}
       </div>
       {L ? (
         <div className={liveGrid}>
@@ -83,7 +84,7 @@ const liveLine = (lv) => {
           </div>
         </div>
       ) : (
-        <p className={liveNone}>{T.notPlaying(live)}</p>
+        <p className={liveNone}>{T.notPlaying(name, live)}</p>
       )}
     </div>
   );
@@ -92,7 +93,7 @@ const liveLine = (lv) => {
 const AVG = [["PTS", T.PTS], ["AST", T.AST], ["REB", T.REB], ["3P%", "3P%"], ["FG%", "FG%"], ["FT%", "FT%"]];
 const injuryPill = (inj, cls) => inj && <span className={`${pill} ${warnP} ${cls || ""}`}>⚠ {T.injured(inj.status)}</span>;
 
-const detailView = (s, inj, games, dispatch) => {
+const detailView = (p, s, inj, games, dispatch) => {
   const gs = games || [];
   const best = gs.reduce((b, g) => (+g.pts > +(b?.pts ?? -1) ? g : b), null);
   const trend = [...gs].reverse();
@@ -100,7 +101,7 @@ const detailView = (s, inj, games, dispatch) => {
   return (
     <div className={detail}>
       <div className={hdr}>
-        <b className={dName}>Steph Curry</b><span className={muted}>#30 · PG</span>
+        <b className={dName}>{p.name}</b><span className={muted}>{[p.jersey && `#${p.jersey}`, p.pos, p.team].filter(Boolean).join(" · ")}</span>
         {injuryPill(inj)}
         <button className={iconBtn} style={{ marginLeft: inj ? 0 : "auto" }} onClick={() => dispatch({ type: "TOGGLE" })} title={T.close}>✕</button>
       </div>
@@ -167,21 +168,25 @@ const detailView = (s, inj, games, dispatch) => {
 const message = (text) => <div className={wrap}><section className={panel}><p className={muted}>{text}</p></section></div>;
 
 const view = ({ data, error, open }, dispatch) => {
-  const { games, stats, live, injury: inj } = data || {};
+  const { games, stats, live, injury: inj, player: p } = data || {};
+  if (data?.error === "notFound") return message(T.notFound(data.query));
   const s = averages(stats);
-  if (!s) return message(error || T.loading);
+  if (!s || !p) return message(error || T.loading);
+  const hex = (c, d) => `#${/^[0-9a-f]{6}$/i.test(c || "") ? c : d}`;
+  const c1 = hex(p.alt, "8a8a8a"), c2 = hex(p.color, "FFC72C");
   const v = s.season || {};
   return (
     <div className={wrap}>
-      <section className={`${panel} ${gswAccent}`}>
-        {open ? detailView(s, inj, games, dispatch) : <>
+      <section className={panel}>
+        <span className={stripe} style={{ background: `linear-gradient(90deg, ${c1} 50%, ${c2} 50%)` }} />
+        {open ? detailView(p, s, inj, games, dispatch) : <>
           <header className={hdr}>
-            <span className={avatar}>30</span>
-            <span className={btnTxt}><b>Steph Curry</b><span>{T.gpAvg(v.GP ?? "–")}</span></span>
+            <span className={avatar} style={{ borderColor: c2 }}>{p.headshot ? <img src={p.headshot} alt="" /> : p.jersey}</span>
+            <span className={btnTxt}><b>{p.name}</b><span>{T.gpAvg(v.GP ?? "–")}</span></span>
             {injuryPill(inj, right)}
           </header>
           {inj?.note && <p className={note}>{inj.note}</p>}
-          {liveLine(live)}
+          {liveLine(live, p.short)}
           <div className={tiles}>
             {["PTS", "3P%", "AST", "REB"].map((k, i) => (
               <div key={k}><b className={k === "3P%" ? goldTxt : ""}>{v[k] ?? "–"}</b><span>{T.tiles[i]}</span></div>
@@ -206,7 +211,7 @@ export const render = (state, dispatch) => {
 export const className = `top: 40px; left: 24px; width: 360px;`;
 const wrap = css`display: flex; flex-direction: column; gap: 10px; font: 13px/1.45 -apple-system, "SF Pro Text", sans-serif; color: #f2f2f2; -webkit-font-smoothing: antialiased;`;
 const panel = css`position: relative; overflow: hidden; background: rgba(18,18,22,0.76); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border-radius: 16px; border: 0.5px solid rgba(255,255,255,0.12); padding: 14px 16px; p { margin: 0; }`;
-const gswAccent = css`&::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: linear-gradient(90deg, #1D428A 50%, #FFC72C 50%); }`;
+const stripe = css`position: absolute; inset: 0 0 auto 0; height: 3px;`; // team colours, set inline
 const hdr = css`display: flex; align-items: center; gap: 8px; margin-bottom: 10px;`;
 const right = css`margin-left: auto;`;
 const pill = css`font-size: 11px; font-weight: 700; letter-spacing: 0.02em; padding: 2px 8px; border-radius: 999px; white-space: nowrap;`;
@@ -215,7 +220,7 @@ const muted = css`color: rgba(255,255,255,0.55); font-size: 12px;`;
 const openBtn = css`margin-top: 12px; width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; cursor: pointer; text-align: left;
   background: rgba(255,199,44,0.08); border: 0.5px solid rgba(255,199,44,0.28); color: #f2f2f2; font: inherit; transition: background .15s;
   &:hover { background: rgba(255,199,44,0.16); }`;
-const avatar = css`width: 34px; height: 34px; border-radius: 50%; background: #1D428A; color: #FFC72C; font-weight: 800; font-size: 13px; display: flex; align-items: center; justify-content: center; border: 1.5px solid #FFC72C;`;
+const avatar = css`flex: none; width: 34px; height: 34px; border-radius: 50%; overflow: hidden; background: rgba(255,255,255,0.08); font-weight: 800; font-size: 13px; display: flex; align-items: center; justify-content: center; border: 1.5px solid; img { width: 100%; height: 100%; object-fit: cover; object-position: top; }`;
 const btnTxt = css`flex: 1; display: flex; flex-direction: column; b { font-size: 14px; } span { font-size: 11.5px; color: rgba(255,255,255,0.55); }`;
 const chev = css`font-size: 20px; color: rgba(255,255,255,0.5);`;
 const detail = css`margin-top: 12px; padding-top: 12px; border-top: 0.5px solid rgba(255,255,255,0.1); max-height: 70vh; overflow-y: auto; margin-right: -8px; padding-right: 8px;
