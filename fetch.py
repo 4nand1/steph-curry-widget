@@ -1,14 +1,17 @@
-# Fetches one NBA player's data from ESPN's public JSON and prints one small JSON for the widget
-# (the raw schedule alone is ~1MB, too much to hand to the widget). Stdlib only.
-# Usage: python3 fetch.py "Stephen Curry"   (a name, or an ESPN athlete id such as 3975)
-import datetime as dt, json, os, sys, urllib.parse, urllib.request
+# Builds the data for every card in config.json (or config.example.json) and prints one small JSON
+# for the widget. Stdlib only. A card is one of:
+#   {"title", "url" (+ optional "headers"), "fields": [{"label", "path", "format", "unit", "decimals"}]}
+#   {"title", "command", "fields": [...]}            (output parsed as JSON, otherwise used as text)
+#   {"type": "nba-player", "player": "Stephen Curry"} (a name or an ESPN athlete id)
+import concurrent.futures as cf, datetime as dt, json, os, subprocess, urllib.parse, urllib.request
 
+HERE = os.path.dirname(os.path.abspath(__file__))
 E = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba"
-CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".player-ids.json")  # name -> ESPN id
+CACHE = os.path.join(HERE, ".player-ids.json")  # name -> ESPN id
 
-def get(url):
+def get(url, headers=None):
     try:
-        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"}), timeout=10) as r:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0", **(headers or {})}), timeout=10) as r:
             return json.load(r)
     except Exception:
         return None
@@ -72,12 +75,12 @@ def live_game(pid, team_id):
             "opp": them["team"]["abbreviation"], "home": us.get("homeAway") == "home",
             "us": us.get("score"), "them": them.get("score"), "line": line}
 
-def main(query):
+def nba_player(query):
     pid = player_id(query)
     if not pid: return {"error": "notFound", "query": query}
     A = f"https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes/{pid}"
     a = (get(A) or {}).get("athlete")
-    if not a: return None  # ESPN unreachable: print null, the widget keeps its last data
+    if not a: return {"error": "unreachable"}  # the widget keeps this card's last data
     t = a.get("team") or {}
     inj = (a.get("injuries") or [None])[0]
     ov = get(f"{A}/overview")
@@ -92,5 +95,49 @@ def main(query):
         "injury": inj and {"status": inj.get("status"), "note": inj.get("shortComment")},
     }
 
+def pluck(obj, path):
+    """Value at a dotted path such as "bitcoin.usd" or "items.0.name"; "" is the whole value."""
+    for part in filter(None, str(path or "").split(".")):
+        obj = obj[int(part)] if isinstance(obj, list) else obj[part]
+    return obj
+
+def fields_card(c):
+    if c.get("url"):
+        raw = get(c["url"], c.get("headers"))
+        if raw is None: return {"error": "unreachable"}
+    else:
+        out = subprocess.run(c["command"], shell=True, capture_output=True, text=True, timeout=20).stdout.strip()
+        try: raw = json.loads(out)
+        except ValueError: raw = out
+    fields = []
+    for f in c.get("fields") or [{}]:
+        try: v = pluck(raw, f.get("path"))
+        except (KeyError, IndexError, ValueError, TypeError): v = None
+        if isinstance(v, (dict, list)): v = json.dumps(v, ensure_ascii=False)[:60]
+        fields.append({**f, "value": v})
+    return {"fields": fields}
+
+def card(c):
+    base = {"type": c.get("type") or "fields", "title": c.get("title"), "color": c.get("color")}
+    try:
+        if base["type"] == "nba-player": return {**base, **nba_player(str(c.get("player") or "Stephen Curry"))}
+        if not (c.get("url") or c.get("command")): return {**base, "error": "noSource"}
+        return {**base, **fields_card(c)}
+    except Exception as e:
+        return {**base, "error": "failed", "detail": str(e)[:120]}
+
+def main():
+    for name in ("config.json", "config.example.json"):
+        path = os.path.join(HERE, name)
+        if os.path.exists(path):
+            try: cfg = json.load(open(path, encoding="utf-8"))
+            except ValueError as e: return {"error": "config", "detail": f"{name}: {e}"}
+            break
+    else:
+        return {"error": "config", "detail": "config.json not found"}
+    cards = cfg.get("cards") or []
+    with cf.ThreadPoolExecutor(max_workers=8) as ex:
+        return {"lang": cfg.get("lang", "en"), "cards": list(ex.map(card, cards))}
+
 if __name__ == "__main__":
-    print(json.dumps(main(" ".join(sys.argv[1:]) or "Stephen Curry"), ensure_ascii=False))
+    print(json.dumps(main(), ensure_ascii=False))

@@ -1,6 +1,6 @@
 {
-  "name": "NBA Player",
-  "description": "Follow any NBA player: live 3PT line, season averages, injury status and game log (ESPN data)",
+  "name": "Stat Cards",
+  "description": "Cards for any numbers you choose (JSON URL or shell command), plus a live NBA player card",
   "author": "4nand1",
   "email": "233663651+4nand1@users.noreply.github.com"
 }

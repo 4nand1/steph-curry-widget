@@ -1,9 +1,6 @@
-// NBA player desktop widget for Übersicht (ESPN data via fetch.py): injury status, live game line,
-// season averages; the button opens the season history (career compare, points trend, best game, game log).
+// Stat cards for Übersicht: each card in config.json shows numbers from a URL or a shell command,
+// or, with "type": "nba-player", a player's live game line, averages and game log (ESPN). fetch.py builds the data.
 import { css, React } from "uebersicht";
-
-const PLAYER = "Stephen Curry"; // any NBA player: a name ("LeBron James") or an ESPN athlete id ("1966")
-const LANG = "en"; // "en" or "mn"
 
 const STR = {
   en: {
@@ -13,7 +10,8 @@ const STR = {
     season: "Season", career: "Career", gp: "GP", hint: "Gold: season average is above the career average.",
     trend: "Season points · by game", best: "Season high", log: "Game log",
     cols: ["Date", "Opp", "W/L", "MIN", "PTS", "REB", "AST", "3PT"],
-    loading: "Loading player stats…", notFound: (q) => `No NBA player found for "${q}". Check PLAYER in index.jsx.`, gpAvg: (n) => `Averages over ${n} games`,
+    loading: "Loading…", notFound: (q) => `No NBA player found for "${q}". Check "player" in config.json.`,
+    unreachable: "Could not reach the source.", noSource: "Add a \"url\" or \"command\" to this card in config.json.", failed: "This card failed", config: "config.json problem", gpAvg: (n) => `Averages over ${n} games`,
     tiles: ["Points", "3PT %", "Assists", "Rebounds"],
     btn: "Game log & career", btnSub: "Points per game, season high, career averages",
     injured: (s) => s || "Injured", error: "Widget error", noPython: "Could not run fetch.py. Is python3 installed? (xcode-select --install)",
@@ -25,24 +23,28 @@ const STR = {
     season: "Улирал", career: "Карьер", gp: "тогл.", hint: "Шар өнгөтэй тоо: улирлын дундаж карьерынхаас өндөр байна.",
     trend: "Улирлын оноо · тоглолт бүрээр", best: "Улирлын шилдэг", log: "Тоглолтын түүх",
     cols: ["Огноо", "Өрс.", "Ү/Д", "Мин", "Оноо", "Самб", "Дамж", "3PT"],
-    loading: "Тоглогчийн мэдээлэл ачаалж байна…", notFound: (q) => `"${q}" нэртэй NBA тоглогч олдсонгүй. index.jsx доторх PLAYER-ийг шалгана уу.`, gpAvg: (n) => `${n} тоглолтын дундаж`,
+    loading: "Ачаалж байна…", notFound: (q) => `"${q}" нэртэй NBA тоглогч олдсонгүй. config.json доторх "player"-ийг шалгана уу.`,
+    unreachable: "Эх сурвалжтай холбогдож чадсангүй.", noSource: "config.json-д энэ картын \"url\" эсвэл \"command\"-ийг бичнэ үү.", failed: "Карт алдаатай", config: "config.json алдаатай", gpAvg: (n) => `${n} тоглолтын дундаж`,
     tiles: ["Оноо", "3 оноо %", "Дамж.", "Самбар"],
     btn: "Тоглолтын түүх ба карьер", btnSub: "Тоглолт бүрийн оноо, шилдэг тоглолт, карьерын дундаж",
     injured: () => "Бэртэлтэй", error: "Самбар алдаатай", noPython: "fetch.py ажиллаж чадсангүй. python3 суусан эсэхийг шалгана уу (xcode-select --install).",
   },
 };
-const T = STR[LANG] || STR.en;
+let T = STR.en; // set from config.json's "lang" on each render
 
-export const command = `python3 nba-player.widget/fetch.py "${PLAYER.replace(/[^\w .'-]/g, "")}"`; // path is relative to the widgets folder
+export const command = "python3 stat-cards.widget/fetch.py"; // path is relative to the widgets folder
 export const refreshFrequency = 60 * 1000; // 1 min: fresh within a minute of login or wake
 
-export const initialState = { data: null, error: null, open: false };
+// A card whose source was unreachable this time keeps its last good data.
+const merge = (old, d) => ({ ...d, cards: (d.cards || []).map((c, i) => (c.error === "unreachable" && old?.cards?.[i] && !old.cards[i].error && old.cards[i].title === c.title ? old.cards[i] : c)) });
+
+export const initialState = { data: null, error: null, open: null };
 export const updateState = (e, s) => {
   if (e.type === "UB/COMMAND_RAN") {
-    if (e.error) return s.data ? s : { ...s, error: T.noPython }; // keep last good data on a transient failure
-    try { const d = JSON.parse(e.output); return d ? { ...s, data: d, error: null } : s; } catch { return s; } // null = ESPN unreachable
+    if (e.error) return s.data ? s : { ...s, error: T.noPython };
+    try { const d = JSON.parse(e.output); return { ...s, data: d.cards ? merge(s.data, d) : d, error: null }; } catch { return s; }
   }
-  if (e.type === "TOGGLE") return { ...s, open: !s.open };
+  if (e.type === "TOGGLE") return { ...s, open: s.open === e.i ? null : e.i };
   return s;
 };
 
@@ -90,10 +92,11 @@ const liveLine = (lv, name) => {
   );
 };
 
-const AVG = [["PTS", T.PTS], ["AST", T.AST], ["REB", T.REB], ["3P%", "3P%"], ["FG%", "FG%"], ["FT%", "FT%"]];
+const avgCols = () => [["PTS", T.PTS], ["AST", T.AST], ["REB", T.REB], ["3P%", "3P%"], ["FG%", "FG%"], ["FT%", "FT%"]];
 const injuryPill = (inj, cls) => inj && <span className={`${pill} ${warnP} ${cls || ""}`}>⚠ {T.injured(inj.status)}</span>;
 
-const detailView = (p, s, inj, games, dispatch) => {
+const detailView = (p, s, inj, games, toggle) => {
+  const AVG = avgCols();
   const gs = games || [];
   const best = gs.reduce((b, g) => (+g.pts > +(b?.pts ?? -1) ? g : b), null);
   const trend = [...gs].reverse();
@@ -103,7 +106,7 @@ const detailView = (p, s, inj, games, dispatch) => {
       <div className={hdr}>
         <b className={dName}>{p.name}</b><span className={muted}>{[p.jersey && `#${p.jersey}`, p.pos, p.team].filter(Boolean).join(" · ")}</span>
         {injuryPill(inj)}
-        <button className={iconBtn} style={{ marginLeft: inj ? 0 : "auto" }} onClick={() => dispatch({ type: "TOGGLE" })} title={T.close}>✕</button>
+        <button className={iconBtn} style={{ marginLeft: inj ? 0 : "auto" }} onClick={toggle} title={T.close}>✕</button>
       </div>
       {inj?.note && <p className={note}>{inj.note}</p>}
 
@@ -166,38 +169,83 @@ const detailView = (p, s, inj, games, dispatch) => {
 };
 
 const message = (text) => <div className={wrap}><section className={panel}><p className={muted}>{text}</p></section></div>;
+const hex = (c, d) => { const h = String(c || "").replace(/^#/, ""); return `#${/^[0-9a-f]{6}$/i.test(h) ? h : d}`; };
 
-const view = ({ data, error, open }, dispatch) => {
-  const { games, stats, live, injury: inj, player: p } = data || {};
-  if (data?.error === "notFound") return message(T.notFound(data.query));
+// One NBA player: live line, averages, injury, and the game log behind the button.
+const playerCard = (c, open, toggle) => {
+  const { games, stats, live, injury: inj, player: p } = c;
   const s = averages(stats);
-  if (!s || !p) return message(error || T.loading);
-  const hex = (c, d) => `#${/^[0-9a-f]{6}$/i.test(c || "") ? c : d}`;
-  const c1 = hex(p.alt, "8a8a8a"), c2 = hex(p.color, "FFC72C");
+  if (!s || !p) return <section className={panel}><p className={muted}>{T.loading}</p></section>;
+  const c1 = hex(p.alt, "8a8a8a"), c2 = hex(c.color || p.color, "FFC72C");
   const v = s.season || {};
   return (
+    <section className={panel}>
+      <span className={stripe} style={{ background: `linear-gradient(90deg, ${c1} 50%, ${c2} 50%)` }} />
+      {open ? detailView(p, s, inj, games, toggle) : <>
+        <header className={hdr}>
+          <span className={avatar} style={{ borderColor: c2 }}>{p.headshot ? <img src={p.headshot} alt="" /> : p.jersey}</span>
+          <span className={btnTxt}><b>{p.name}</b><span>{T.gpAvg(v.GP ?? "–")}</span></span>
+          {injuryPill(inj, right)}
+        </header>
+        {inj?.note && <p className={note}>{inj.note}</p>}
+        {liveLine(live, p.short)}
+        <div className={tiles}>
+          {["PTS", "3P%", "AST", "REB"].map((k, i) => (
+            <div key={k}><b className={k === "3P%" ? goldTxt : ""}>{v[k] ?? "–"}</b><span>{T.tiles[i]}</span></div>
+          ))}
+        </div>
+        <button className={openBtn} onClick={toggle}>
+          <span className={btnTxt}><b>{T.btn}</b><span>{T.btnSub}</span></span>
+          <span className={chev}>›</span>
+        </button>
+      </>}
+    </section>
+  );
+};
+
+// {value, format: "change" | "number", decimals, prefix, unit} -> shown text and colour
+const show = (f) => {
+  const v = f.value;
+  if (v == null || v === "") return { text: "–" };
+  const n = typeof v === "number" ? v : /^-?\d+(\.\d+)?$/.test(String(v).trim()) ? +v : null;
+  if (n == null) return { text: `${f.prefix || ""}${v}${f.unit || ""}` };
+  const d = f.decimals ?? (Number.isInteger(n) ? 0 : 2);
+  const num = Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: f.format === "change" ? d : 0, maximumFractionDigits: d });
+  const sign = n < 0 ? "−" : f.format === "change" && n > 0 ? "+" : "";
+  return { text: `${sign}${f.prefix || ""}${num}${f.unit || ""}`, tone: f.format === "change" ? (n > 0 ? upTxt : n < 0 ? downTxt : "") : "" };
+};
+
+const fieldsCard = (c) => (
+  <section className={panel}>
+    {c.color && <span className={stripe} style={{ background: hex(c.color, "FFC72C") }} />}
+    {c.title && <p className={cardTitle}>{c.title}</p>}
+    <div className={tiles} style={{ gridTemplateColumns: `repeat(${Math.min(c.fields.length, 4)}, 1fr)` }}>
+      {c.fields.map((f, i) => {
+        const { text, tone } = show(f);
+        return <div key={i}><b className={tone || ""} style={text.length > 9 ? { fontSize: 14 } : null}>{text}</b>{f.label && <span>{f.label}</span>}</div>;
+      })}
+    </div>
+  </section>
+);
+
+const errorCard = (c) => (
+  <section className={panel}>
+    {c.title && <p className={cardTitle}>{c.title}</p>}
+    <p className={muted}>{c.error === "notFound" ? T.notFound(c.query) : T[c.error] || `${T.failed}${c.detail ? `: ${c.detail}` : ""}`}</p>
+  </section>
+);
+
+const view = ({ data, error, open }, dispatch) => {
+  T = STR[data?.lang] || STR.en;
+  if (!data) return message(error || T.loading);
+  if (data.error) return message(`${T.config}: ${data.detail || data.error}`);
+  return (
     <div className={wrap}>
-      <section className={panel}>
-        <span className={stripe} style={{ background: `linear-gradient(90deg, ${c1} 50%, ${c2} 50%)` }} />
-        {open ? detailView(p, s, inj, games, dispatch) : <>
-          <header className={hdr}>
-            <span className={avatar} style={{ borderColor: c2 }}>{p.headshot ? <img src={p.headshot} alt="" /> : p.jersey}</span>
-            <span className={btnTxt}><b>{p.name}</b><span>{T.gpAvg(v.GP ?? "–")}</span></span>
-            {injuryPill(inj, right)}
-          </header>
-          {inj?.note && <p className={note}>{inj.note}</p>}
-          {liveLine(live, p.short)}
-          <div className={tiles}>
-            {["PTS", "3P%", "AST", "REB"].map((k, i) => (
-              <div key={k}><b className={k === "3P%" ? goldTxt : ""}>{v[k] ?? "–"}</b><span>{T.tiles[i]}</span></div>
-            ))}
-          </div>
-          <button className={openBtn} onClick={() => dispatch({ type: "TOGGLE" })}>
-            <span className={btnTxt}><b>{T.btn}</b><span>{T.btnSub}</span></span>
-            <span className={chev}>›</span>
-          </button>
-        </>}
-      </section>
+      {data.cards.map((c, i) => (
+        <React.Fragment key={i}>
+          {c.error ? errorCard(c) : c.type === "nba-player" ? playerCard(c, open === i, () => dispatch({ type: "TOGGLE", i })) : fieldsCard(c)}
+        </React.Fragment>
+      ))}
     </div>
   );
 };
@@ -261,6 +309,9 @@ const finDot = css`color: rgba(255,255,255,0.6); font-weight: 700;`;
 const liveGrid = css`display: grid; grid-template-columns: auto auto 1fr; gap: 16px; align-items: end;`;
 const liveMain = css`display: flex; flex-direction: column; b { font-size: 30px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; } span { font-size: 11px; color: rgba(255,255,255,0.6); margin-top: 2px; }`;
 const goldTxt = css`color: #FFD866;`;
+const upTxt = css`color: #7FE0BE;`;
+const downTxt = css`color: #FF9F9F;`;
+const cardTitle = css`font-size: 10.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255,255,255,0.55); margin-bottom: 2px !important;`;
 const liveSide = css`display: flex; flex-direction: column; gap: 1px; font-size: 11.5px; color: rgba(255,255,255,0.75); text-align: right; font-variant-numeric: tabular-nums;`;
 const liveNone = css`font-size: 12px; color: rgba(255,255,255,0.6);`;
 const tiles = css`display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 12px; div { background: rgba(255,255,255,0.05); border-radius: 10px; padding: 8px 0; text-align: center; } b { display: block; font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; } span { font-size: 10.5px; color: rgba(255,255,255,0.5); }`;

@@ -1,73 +1,86 @@
-# NBA player widget for Übersicht
+# Stat cards for Übersicht
 
-A small macOS desktop widget for [Übersicht](https://tracesof.net/uebersicht/) that follows **any NBA player you choose**. It shows 3-point shooting first.
+A macOS desktop widget for [Übersicht](https://tracesof.net/uebersicht/) that shows **whatever numbers you choose**, as a stack of small cards. Each card reads one of these:
+
+- a JSON URL;
+- a shell command;
+- a ready-made **NBA player** card, with live 3PT line, averages, injury status and game log.
 
 ![Widget screenshot](docs/screenshot.png)
-
-- **Season averages:** points, 3PT %, assists, rebounds.
-- **Live game line:** while the player's team plays (and for 12 hours after), it shows:
-  - points;
-  - 3PT made/attempted and %;
-  - FG, assists, rebounds, minutes and +/-.
-- **Injury status:** taken from ESPN's injury report, and hidden when the player is healthy.
-- **Game log & career** (click the button): season vs career averages, points per game, season high, and the full game log.
-- **Team look:** the team colours, headshot, jersey and position all come from ESPN, so the card matches whoever you pick.
-- Refreshes every minute. English or Mongolian.
 
 ## Install
 
 You need [Übersicht](https://tracesof.net/uebersicht/) and `python3`. To get `python3`, run `xcode-select --install`, or use Homebrew.
 
 ```bash
-git clone https://github.com/4nand1/nba-player-widget.git ~/Library/Application\ Support/Übersicht/widgets/nba-player.widget
+git clone https://github.com/4nand1/stat-cards.git ~/Library/Application\ Support/Übersicht/widgets/stat-cards.widget
 ```
 
-The folder name must be `nba-player.widget`, because the widget runs `nba-player.widget/fetch.py`.
+The folder name must be `stat-cards.widget`, because the widget runs `stat-cards.widget/fetch.py`.
 
-To update:
+Next, copy the example config and edit it:
 
 ```bash
-git -C ~/Library/Application\ Support/Übersicht/widgets/nba-player.widget pull
+cp ~/Library/Application\ Support/Übersicht/widgets/stat-cards.widget/config.example.json ~/Library/Application\ Support/Übersicht/widgets/stat-cards.widget/config.json
 ```
+
+Until a `config.json` exists, the widget shows the example cards. `config.json` is git-ignored, so `git pull` never overwrites it.
 
 To have it on screen from login, turn on **Launch Übersicht when I login** in Übersicht's preferences.
 
-## Pick your player
+## Config
 
-Open `index.jsx` and change the first setting:
-
-```js
-const PLAYER = "Stephen Curry"; // e.g. "LeBron James", "Victor Wembanyama", or an ESPN id like "1966"
+```json
+{
+  "lang": "en",
+  "cards": [
+    {
+      "title": "Bitcoin",
+      "color": "#F7931A",
+      "url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true",
+      "fields": [
+        { "label": "USD", "path": "bitcoin.usd", "prefix": "$", "decimals": 0 },
+        { "label": "24h", "path": "bitcoin.usd_24h_change", "format": "change", "unit": "%" }
+      ]
+    },
+    { "title": "This Mac", "command": "df -h / | awk 'NR==2 {print $5}'", "fields": [{ "label": "Disk used" }] },
+    { "type": "nba-player", "player": "Stephen Curry" }
+  ]
+}
 ```
 
-- A name is looked up with ESPN's search once, then cached in `.player-ids.json`.
-- If two players share a name, use the ESPN athlete id. It is the number in the player's ESPN URL, e.g. `espn.com/nba/player/_/id/1966/lebron-james`.
-- If no NBA player matches, the widget says so.
+| Key | Meaning |
+|---|---|
+| `lang` | `"en"` or `"mn"` (Mongolian) |
+| `title`, `color` | Card heading, and the colour of its top stripe |
+| `url` | A JSON endpoint. `headers` (an object) is optional, e.g. for an API key |
+| `command` | A shell command. JSON output is read like a URL's; any other output is shown as text |
+| `fields` | Up to 4 tiles per card |
+| `path` | Where the value sits in the JSON, as a dotted path: `bitcoin.usd`, `items.0.name`. Leave it out to use the whole output |
+| `format` | `"change"` adds a +/− sign and green/red colour |
+| `decimals`, `prefix`, `unit` | Number formatting, e.g. `"prefix": "$"`, `"unit": "%"` |
+| `"type": "nba-player"` | With `player` set to a name (`"LeBron James"`) or an ESPN athlete id (`"1966"`) |
+
+For an NBA player card:
+- A name is looked up with ESPN's search once, then cached.
+- If two players share a name, use the id. It is the number in the player's ESPN URL.
+- The card takes the team colours and headshot from ESPN.
+
+A card whose source is down keeps its last value. A broken card shows its own error, and the other cards keep working.
 
 ## Other settings
 
-These are at the top of `index.jsx`:
-
-| What | Where |
-|---|---|
-| Language | `const LANG = "en"` (`"en"` or `"mn"`) |
-| Position and width | `export const className`, at the bottom of the styles |
-| Refresh rate | `refreshFrequency` (default 1 minute) |
+These live in `index.jsx`:
+- **Refresh rate:** `refreshFrequency`. The default is 1 minute; mind the rate limits of the APIs you use.
+- **Position and width:** `export const className`, at the bottom of the file.
 
 ## How it works
 
-`fetch.py` uses only the Python standard library. It reads ESPN's public JSON endpoints and prints one small JSON object for the widget. The raw schedule alone is about 1 MB. The endpoints it reads:
-
-- player search;
-- athlete record, with team and injury report;
-- overview;
-- game log;
-- team schedule;
-- box score.
+`fetch.py` uses only the Python standard library. It reads the config and fetches all the cards in parallel. It then prints one small JSON object, which the widget renders.
 
 ## Disclaimer
 
-This is a fan project. It is not affiliated with or endorsed by the NBA, its teams or players, or ESPN. The ESPN endpoints are unofficial and may change without notice.
+This is a fan project. It is not affiliated with the NBA, its teams or players, ESPN, or any API it is pointed at. The ESPN endpoints are unofficial and may change without notice.
 
 ## License
 
